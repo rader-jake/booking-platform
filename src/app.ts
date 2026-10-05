@@ -66,6 +66,19 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
   app.decorateRequest("tenant", null as unknown as Tenant);
 
+  // Browsers' fetch wrappers often send Content-Type: application/json on body-less DELETEs;
+  // treat an empty JSON body as no body instead of a 400.
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    const text = typeof body === "string" ? body : body.toString("utf8");
+    if (!text.trim()) return done(null, undefined);
+    try {
+      done(null, JSON.parse(text));
+    } catch {
+      done(new AppError(400, "INVALID_JSON", "Request body is not valid JSON"), undefined);
+    }
+  });
+
   // CORS: each tenant's allowed_origins. No match = no CORS headers, so browsers block it.
   await app.register(cors, {
     delegator: (req, cb) => {

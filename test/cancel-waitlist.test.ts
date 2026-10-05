@@ -35,6 +35,20 @@ describe("DELETE /api/:tenant/bookings/:id", () => {
     expect(calendar.calls.deleteEvent).toBe(1);
   });
 
+  it("accepts a DELETE that sends Content-Type: application/json with no body", async () => {
+    await createTenant({ slug: "rissa" });
+    const { app } = await makeApp();
+    const { booking, cancelToken } = await book(app, "rissa");
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/api/rissa/bookings/${booking.id}?token=${cancelToken}`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.statusCode).toBe(200);
+    const bad = await app.inject({ method: "POST", url: "/api/rissa/waitlist", headers: { "content-type": "application/json" }, payload: "{nope" });
+    expect(bad.json().error.code).toBe("INVALID_JSON");
+  });
+
   it("returns 404 for a wrong token, an unknown id, or a malformed id", async () => {
     await createTenant({ slug: "rissa" });
     const { app } = await makeApp();
