@@ -8,3 +8,6 @@ export function createDb(databaseUrl: string): { db: Db; pool: pg.Pool } {
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 10 });
   return { db: drizzle(pool, { schema }), pool };
 }
+
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+export type DbOrTx = Db | Tx;
