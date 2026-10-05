@@ -64,6 +64,6 @@ export async function createTenant(opts: TenantOpts) {
 export async function makeApp(opts: { now?: Date; calendar?: FakeCalendarProvider; db?: Db } = {}) {
   const calendar = opts.calendar ?? new FakeCalendarProvider();
   let now = opts.now ?? MONDAY_8AM;
-  const app = await buildApp({ db: opts.db ?? db, calendar, now: () => now, logLevel: "silent", rateLimit: false });
+  const app = await buildApp({ db: opts.db ?? db, calendar, now: () => now, logLevel: "silent", rateLimit: false, calendarRetryDelaysMs: [0, 0] });
   return { app, calendar, setNow: (d: Date) => (now = d) };
 }

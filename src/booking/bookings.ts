@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, eq, lte } from "drizzle-orm";
 import { DateTime } from "luxon";
 import type { FastifyBaseLogger } from "fastify";
@@ -12,7 +12,14 @@ import type { Notifier } from "../notifications/index.js";
 import { openStarts } from "./availability.js";
 import { loadSelection } from "./catalog.js";
 
-export type Deps = { db: Db; calendar: CalendarProvider; notifier: Notifier; log: FastifyBaseLogger };
+export type Deps = {
+  db: Db;
+  calendar: CalendarProvider;
+  notifier: Notifier;
+  log: FastifyBaseLogger;
+  /** Waits between calendar delete retries on cancel. */
+  calendarRetryDelaysMs?: number[];
+};
 
 export type NewBooking = {
   serviceKey: string;
@@ -227,3 +234,54 @@ export async function presentBooking(db: Db | Tx, tenant: Tenant, b: Booking) {
   };
 }
 
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function tokenMatches(token: string, storedHash: string): boolean {
+  const a = Buffer.from(hashToken(token), "hex");
+  const b = Buffer.from(storedHash, "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * Cancels with the token issued at booking time. Wrong tenant, unknown id and wrong token all
+ * look the same (404). The DB is updated first so the slot frees up immediately; the calendar
+ * delete is retried, and if it still fails the booking is flagged calendar_sync_pending and
+ * logged for reconciliation (the leftover event only over-blocks time, never double-books).
+ */
+export async function cancelBooking(deps: Deps, tenant: Tenant, bookingId: string, token: string, now: Date) {
+  const [existing] = await deps.db
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.id, bookingId), eq(bookings.tenantId, tenant.id)));
+  if (!existing || !tokenMatches(token, existing.cancelTokenHash)) throw notFound("Booking");
+  if (existing.status === "cancelled" || existing.status === "expired") return presentBooking(deps.db, tenant, existing);
+
+  const [cancelled] = (await deps.db
+    .update(bookings)
+    .set({ status: "cancelled", cancelledAt: now })
+    .where(and(eq(bookings.id, existing.id), eq(bookings.tenantId, tenant.id)))
+    .returning()) as [Booking];
+
+  if (cancelled.calendarEventId && tenant.googleCalendarId) {
+    const delays = deps.calendarRetryDelaysMs ?? [250, 1000, 3000];
+    let deleted = false;
+    for (let attempt = 0; attempt <= delays.length && !deleted; attempt++) {
+      try {
+        await deps.calendar.deleteEvent(tenant.googleCalendarId, cancelled.calendarEventId);
+        deleted = true;
+      } catch (err) {
+        deps.log.warn({ bookingId: cancelled.id, attempt: attempt + 1, err: (err as Error).message }, "calendar delete failed");
+        if (attempt < delays.length) await sleep(delays[attempt]!);
+      }
+    }
+    if (!deleted) {
+      await deps.db.update(bookings).set({ calendarSyncPending: true }).where(eq(bookings.id, cancelled.id));
+      cancelled.calendarSyncPending = true;
+      deps.log.error({ bookingId: cancelled.id, tenant: tenant.slug }, "calendar delete failed after retries; booking flagged calendar_sync_pending");
+    }
+  }
+
+  deps.notifier.bookingCancelled(tenant.slug, cancelled).catch((e) => deps.log.warn({ err: (e as Error).message }, "notifier failed"));
+  return presentBooking(deps.db, tenant, cancelled);
+}

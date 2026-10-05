@@ -23,6 +23,7 @@ export type AppDeps = {
   trustProxy?: boolean;
   /** Disable to run fast tests that fire many requests from one IP. */
   rateLimit?: boolean;
+  calendarRetryDelaysMs?: number[];
 };
 
 declare module "fastify" {
@@ -30,7 +31,7 @@ declare module "fastify" {
     tenant: Tenant;
   }
   interface FastifyInstance {
-    deps: Required<Pick<AppDeps, "db" | "calendar" | "notifier" | "now">>;
+    deps: Required<Pick<AppDeps, "db" | "calendar" | "notifier" | "now">> & Pick<AppDeps, "calendarRetryDelaysMs">;
   }
 }
 
@@ -61,6 +62,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     calendar: deps.calendar,
     notifier: deps.notifier ?? noopNotifier,
     now: deps.now ?? (() => new Date()),
+    calendarRetryDelaysMs: deps.calendarRetryDelaysMs,
   });
   app.decorateRequest("tenant", null as unknown as Tenant);
 
