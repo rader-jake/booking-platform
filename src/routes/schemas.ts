@@ -19,3 +19,6 @@ export const customerSchema = {
     .max(25)
     .regex(/^\+?[0-9 ().-]{7,25}$/, "invalid phone number"),
 };
+
+/** Stricter per-IP limit for writes (the global default is 120/min). */
+export const WRITE_RATE_LIMIT = { rateLimit: { max: 10, timeWindow: "1 minute" } };

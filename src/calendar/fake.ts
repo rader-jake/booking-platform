@@ -11,6 +11,8 @@ export class FakeCalendarProvider implements CalendarProvider {
   private readonly busy = new Map<string, Interval[]>();
   private readonly failures = new Map<Op, number>();
   readonly calls: Record<Op, number> = { freeBusy: 0, createEvent: 0, deleteEvent: 0 };
+  /** Artificial freeBusy latency, used to force concurrent requests past the availability pre-check. */
+  freeBusyDelayMs = 0;
 
   /** Simulate time blocked on the calendar for reasons other than bookings. */
   addBusy(calendarId: string, interval: Interval): void {
@@ -37,6 +39,7 @@ export class FakeCalendarProvider implements CalendarProvider {
 
   async freeBusy(calendarIds: string[], timeMin: Date, timeMax: Date): Promise<Interval[]> {
     this.maybeFail("freeBusy");
+    if (this.freeBusyDelayMs) await new Promise((r) => setTimeout(r, this.freeBusyDelayMs));
     const out: Interval[] = [];
     for (const id of calendarIds) {
       const intervals = [

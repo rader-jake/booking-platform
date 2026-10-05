@@ -128,6 +128,3 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   return app;
 }
-
-/** Stricter limit for writes. */
-export const WRITE_RATE_LIMIT = { rateLimit: { max: 10, timeWindow: "1 minute" } };
